@@ -37,8 +37,8 @@ internal class MelSpectrogram(
         try {
             if (session == null) {
                 val sessionOptions = OrtSession.SessionOptions()
-                sessionOptions.setInterOpNumThreads(1)
-                sessionOptions.setIntraOpNumThreads(1)
+                sessionOptions.setInterOpNumThreads(2)
+                sessionOptions.setIntraOpNumThreads(2)
                 session = env.createSession(modelBytes, sessionOptions)
             }
 

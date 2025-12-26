@@ -11,6 +11,7 @@ import com.rementia.openwakeword.lib.model.WakeWordScore
 import com.rementia.openwakeword.lib.model.DetectionMode
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.channels.Channel
 import timber.log.Timber
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -80,11 +81,13 @@ class WakeWordEngine(
      */
     val scores: Flow<WakeWordScore> = _scores.asSharedFlow()
 
+    private val audioChannel = Channel<FloatArray>(capacity = Channel.BUFFERED)
     private var processingJob: Job? = null
 
     init {
         require(models.isNotEmpty()) { "At least one wake word model must be provided" }
         initializeModels()
+        startProcessingLoop()
     }
 
     private fun initializeModels() {
@@ -121,16 +124,21 @@ class WakeWordEngine(
         }
         throw IllegalArgumentException("Model with name $modelName not found")
     }
+    
+    fun processAudio(audioBuffer: FloatArray) {
+        val result = audioChannel.trySend(audioBuffer)
+        if (result.isFailure) {
+            Timber.w("BUFFER DROPPED: System too slow")
+        }
+    }
 
     @SuppressLint("DefaultLocale")
-    fun processAudio(audioBuffer: FloatArray) {
-        // Process all models in parallel and collect results
-        if (processingJob != null && processingJob!!.isActive) {
-            processingJob?.cancel()
-        }
+    private fun startProcessingLoop() {
+        processingJob = scope.launch(Dispatchers.Default) {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
+            for (audioBuffer in audioChannel) {
+                if (!isEnabled) continue
 
-        if (isEnabled) {
-            processingJob = scope.launch {
                 val audioFeatures = _audioProcessor.getAudioFeatures(audioBuffer)
                 val detectionResults = modelProcessors.map { (model, processor) ->
                     async {
@@ -252,6 +260,7 @@ class WakeWordEngine(
      * @see start
      */
     fun stop() {
+        audioChannel.close() 
         processingJob?.cancel()
         processingJob = null
     }
