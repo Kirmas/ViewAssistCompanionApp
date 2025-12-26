@@ -5,6 +5,53 @@ import com.rementia.openwakeword.lib.ml.EmbeddingModel
 import com.rementia.openwakeword.lib.ml.MelSpectrogram
 import java.util.*
 import kotlin.random.Random
+import kotlin.math.min
+
+class FastAudioBuffer(val capacity: Int = 4000) {
+    private val buffer = FloatArray(capacity)
+    private var head = 0 
+    private var totalWritten = 0
+
+    fun append(data: FloatArray) {
+        val n = data.size
+        if (n <= capacity) {
+            val spaceToEnd = capacity - head
+            if (n <= spaceToEnd) {
+                System.arraycopy(data, 0, buffer, head, n)
+            } else {
+                System.arraycopy(data, 0, buffer, head, spaceToEnd)
+                System.arraycopy(data, spaceToEnd, buffer, 0, n - spaceToEnd)
+            }
+            head = (head + n) % capacity
+            totalWritten = min(totalWritten + n, capacity)
+        }
+    }
+
+    fun getLast(n: Int): FloatArray {
+        val outNum = min(n, totalWritten)
+
+        val result = FloatArray(outNum)
+        val startPos = (head - outNum + capacity) % capacity
+        
+        if (startPos + outNum <= capacity) {
+            System.arraycopy(buffer, startPos, result, 0, outNum)
+        } else {
+            val firstPartSize = capacity - startPos
+            System.arraycopy(buffer, startPos, result, 0, firstPartSize)
+            System.arraycopy(buffer, 0, result, firstPartSize, outNum - firstPartSize)
+        }
+        return result
+    }
+
+    fun size(): Int {
+        return totalWritten
+    }
+
+    fun clear() {
+        head = 0
+        totalWritten = 0
+    }
+}
 
 /**
  * Processes audio data for wake word detection.
@@ -28,7 +75,7 @@ internal class AudioProcessor(
     private val embeddingModel = EmbeddingModel(assetManager)
 
     private var featureBuffer: Array<FloatArray>? = null
-    private val rawDataBuffer = ArrayDeque<Float>(SAMPLE_RATE * 10)
+    private val rawDataBuffer = FastAudioBuffer(SAMPLE_RATE * 10)
     private var rawDataRemainder = floatArrayOf()
     private var melSpectrogramBuffer: Array<FloatArray> = Array(WINDOW_SIZE) { FloatArray(MEL_SPEC_FRAMES) { 1.0f } }
     private var accumulatedSamples = 0
@@ -119,23 +166,16 @@ internal class AudioProcessor(
     }
 
     private fun bufferRawData(data: FloatArray) {
-        // Remove old data if buffer is full
-        while (rawDataBuffer.size + data.size > SAMPLE_RATE * 10) {
-            rawDataBuffer.poll()
-        }
-
-        // Add new data
-        data.forEach { rawDataBuffer.offer(it) }
+        rawDataBuffer.append(data)
     }
 
     private fun streamingMelSpectrogram(nSamples: Int) {
-        require(rawDataBuffer.size >= 400) {
+        require(rawDataBuffer.size() >= 400) {
             "The number of input frames must be at least 400 samples @ 16kHz (25 ms)!"
         }
 
         // Get last n_samples + 480 samples
-        val bufferList = rawDataBuffer.toList()
-        val tempArray = bufferList.takeLast(nSamples + 480).toFloatArray()
+        val tempArray = rawDataBuffer.getLast(nSamples + 480)
 
         // Compute mel-spectrogram
         val newMelSpectrogram = melSpectrogram.computeMelSpectrogram(tempArray)
