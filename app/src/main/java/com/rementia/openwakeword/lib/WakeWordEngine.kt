@@ -128,12 +128,20 @@ class WakeWordEngine(
     fun processAudio(audioBuffer: FloatArray) {
         val result = audioChannel.trySend(audioBuffer)
         if (result.isFailure) {
-            Timber.w("BUFFER DROPPED: System too slow")
+            while (!audioChannel.isEmpty) {
+                audioChannel.tryReceive().getOrNull()
+            }
+            Timber.w("BUFFER DROPPED: System too slow. Channel drained.")
         }
     }
 
     @SuppressLint("DefaultLocale")
     private fun startProcessingLoop() {
+        if (processingJob != null) {
+            Timber.w("Processing loop already running")
+            return
+        }
+
         processingJob = scope.launch(Dispatchers.Default) {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
             for (audioBuffer in audioChannel) {

@@ -43,6 +43,7 @@ import kotlin.concurrent.thread
 enum class AudioRouteOption { NONE, DETECT, PROCESS_NO_DETECT, STREAM}
 
 internal class BackgroundTaskController (private val context: Context): EventListener {
+    private var lastLoudTime: Long = 0L
 
     private val firebase = FirebaseManager.getInstance()
     private var config: APPConfig = APPConfig.getInstance(context)
@@ -279,7 +280,16 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                         var audioLevel = audioBuffer.max()
 
                         if (!config.isMuted) {
-                            if (wakeWordEngine != null) wakeWordEngine!!.processAudio(
+                            val isEnophSoundLevel = if (audioBuffer.max() > 0.015f) {// TODO: move magic number to config
+                                lastLoudTime = System.currentTimeMillis()
+                                true
+                            } else if (System.currentTimeMillis() - lastLoudTime < 500) {// TODO: move magic number to config
+                                true
+                            } else {
+                                false
+                            }
+
+                            if (wakeWordEngine != null && isEnophSoundLevel) wakeWordEngine!!.processAudio(
                                 audioBuffer
                             )
                             when (audioRoute) {
